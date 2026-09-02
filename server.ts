@@ -193,6 +193,7 @@ async function generateContentWithRetry(
     primaryModel,
     "gemini-flash-latest",
     "gemini-3.1-flash-lite",
+    "gemini-3.1-pro-preview",
   ];
 
   const uniqueModels = Array.from(new Set(modelsToTry));
@@ -223,12 +224,13 @@ async function generateContentWithRetry(
           err?.code === 429 ||
           errStr.includes("503") ||
           errStr.includes("UNAVAILABLE") ||
-          errStr.includes("high demand");
+          errStr.includes("high demand") ||
+          errStr.includes("fetch failed");
 
         if (isTransient && attempt < maxRetries) {
-          await new Promise((resolve) => setTimeout(resolve, 600 * (attempt + 1)));
+          await new Promise((resolve) => setTimeout(resolve, 1000 * (attempt + 1)));
         } else {
-          // Break to try next fallback model
+          // Break to try next fallback model immediately
           break;
         }
       }

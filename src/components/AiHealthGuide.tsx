@@ -28,6 +28,7 @@ export const AiHealthGuide: React.FC<AiHealthGuideProps> = ({
   const [response, setResponse] = useState<GuideResponse | null>(null);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [isCameraActive, setIsCameraActive] = useState(false);
+  const [isSimulatedCamera, setIsSimulatedCamera] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [conversationHistory, setConversationHistory] = useState<
     Array<{ role: 'user' | 'doctor'; text: string; timestamp: string }>
@@ -36,31 +37,193 @@ export const AiHealthGuide: React.FC<AiHealthGuideProps> = ({
   // Video & Canvas Refs for Google Camera Live
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const simulatedCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
 
-  // Toggle Camera Stream
+  // Animated Simulated Medical Camera Loop
+  useEffect(() => {
+    let animId: number;
+    let angle = 0;
+
+    const renderSimulatedFeed = () => {
+      if (isSimulatedCamera && simulatedCanvasRef.current) {
+        const canvas = simulatedCanvasRef.current;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          const w = canvas.width;
+          const h = canvas.height;
+
+          // Dark cyber background
+          ctx.fillStyle = '#060a14';
+          ctx.fillRect(0, 0, w, h);
+
+          // Grid lines
+          ctx.strokeStyle = '#10192e';
+          ctx.lineWidth = 1;
+          for (let x = 0; x < w; x += 30) {
+            ctx.beginPath();
+            ctx.moveTo(x, 0);
+            ctx.lineTo(x, h);
+            ctx.stroke();
+          }
+          for (let y = 0; y < h; y += 30) {
+            ctx.beginPath();
+            ctx.moveTo(0, y);
+            ctx.lineTo(w, y);
+            ctx.stroke();
+          }
+
+          // Simulated thermal wound pulse in center
+          const pulse = Math.sin(Date.now() / 300) * 8;
+          const radGrad = ctx.createRadialGradient(w / 2, h / 2, 10, w / 2, h / 2, 70 + pulse);
+          radGrad.addColorStop(0, '#ef4444');
+          radGrad.addColorStop(0.4, '#b91c1c');
+          radGrad.addColorStop(0.8, '#450a0a');
+          radGrad.addColorStop(1, 'transparent');
+          ctx.fillStyle = radGrad;
+          ctx.beginPath();
+          ctx.ellipse(w / 2, h / 2, 85 + pulse, 50 + pulse, Math.PI / 12, 0, Math.PI * 2);
+          ctx.fill();
+
+          // Radar line rotation
+          angle += 0.03;
+          ctx.save();
+          ctx.translate(w / 2, h / 2);
+          ctx.rotate(angle);
+          ctx.strokeStyle = '#38bdf8';
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.moveTo(0, 0);
+          ctx.lineTo(0, -120);
+          ctx.stroke();
+          ctx.restore();
+
+          // Live HUD Text Overlay
+          ctx.fillStyle = '#38bdf8';
+          ctx.font = 'bold 12px monospace';
+          ctx.fillText('GOOGLE MULTIMODAL CAMERA SIMULATOR', 20, 30);
+          ctx.fillStyle = '#34d399';
+          ctx.fillText('THERMAL SCAN: 38.4°C (INFLAMED WOUND)', 20, 50);
+          ctx.fillStyle = '#f87171';
+          ctx.fillText('STATUS: BLEEDING / TISSUE DAMAGE DETECTED', 20, 70);
+        }
+      }
+      if (isSimulatedCamera) {
+        animId = requestAnimationFrame(renderSimulatedFeed);
+      }
+    };
+
+    if (isSimulatedCamera) {
+      renderSimulatedFeed();
+    }
+    return () => {
+      cancelAnimationFrame(animId);
+    };
+  }, [isSimulatedCamera]);
+
+  const [isListening, setIsListening] = useState(false);
+  const [audioLevel, setAudioLevel] = useState<number>(0);
+  const recognitionRef = useRef<any>(null);
+
+  // Toggle Continuous Microphone Speech Recognition
+  const toggleListening = () => {
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      alert('Speech recognition is not supported in this browser. You can type your question in the box.');
+      return;
+    }
+
+    if (isListening) {
+      if (recognitionRef.current) {
+        recognitionRef.current.stop();
+      }
+      setIsListening(false);
+    } else {
+      try {
+        const recognition = new SpeechRecognition();
+        recognition.continuous = true;
+        recognition.interimResults = true;
+        recognition.lang = 'en-US';
+
+        recognition.onstart = () => {
+          setIsListening(true);
+        };
+
+        recognition.onresult = (event: any) => {
+          let currentTranscript = '';
+          for (let i = event.resultIndex; i < event.results.length; ++i) {
+            currentTranscript += event.results[i][0].transcript;
+          }
+          if (currentTranscript.trim()) {
+            setPrompt(currentTranscript);
+          }
+        };
+
+        recognition.onerror = (err: any) => {
+          console.warn('Speech recognition error:', err);
+          setIsListening(false);
+        };
+
+        recognition.onend = () => {
+          setIsListening(false);
+        };
+
+        recognitionRef.current = recognition;
+        recognition.start();
+      } catch (err) {
+        console.error('Speech recognition start error:', err);
+        setIsListening(false);
+      }
+    }
+  };
+
+  // Toggle Camera Stream with Explicit Camera + Mic Permission Request
   const handleToggleCameraLive = async () => {
     if (isCameraActive) {
       stopCameraStream();
     } else {
       setCameraError(null);
+      setIsSimulatedCamera(false);
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } },
-          audio: false,
-        });
+        let stream: MediaStream | null = null;
+        try {
+          // Explicitly request both video AND audio to trigger standard browser permission dialog
+          stream = await navigator.mediaDevices.getUserMedia({
+            video: { width: { ideal: 1280 }, height: { ideal: 720 } },
+            audio: true,
+          });
+        } catch (e1) {
+          console.warn('Video + Audio request failed, trying video only:', e1);
+          // Fallback to video only
+          stream = await navigator.mediaDevices.getUserMedia({
+            video: true,
+            audio: false,
+          });
+        }
+
         streamRef.current = stream;
+        setIsSimulatedCamera(false);
+        setIsCameraActive(true);
+
+        // Attach stream if video element is already mounted
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
-          await videoRef.current.play();
+          videoRef.current.play().catch((err) => console.warn('Video play error:', err));
         }
-        setIsCameraActive(true);
+
+        // Auto-start microphone dictation if available
+        if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
+          toggleListening();
+        }
       } catch (err: any) {
-        console.error('Camera live access error:', err);
+        console.warn('Camera live access restricted or denied:', err?.name, err?.message);
         setCameraError(
-          'Could not access camera. Please allow camera permissions or upload a wound photo.'
+          err?.name === 'NotAllowedError' || err?.message?.includes('Permission denied')
+            ? 'Camera / Microphone permission was denied by the browser or iframe policy.'
+            : 'Could not access hardware camera directly.'
         );
-        setIsCameraActive(false);
+        setIsCameraActive(true);
       }
     }
   };
@@ -74,7 +237,18 @@ export const AiHealthGuide: React.FC<AiHealthGuideProps> = ({
       videoRef.current.srcObject = null;
     }
     setIsCameraActive(false);
+    setIsSimulatedCamera(false);
   };
+
+  // Ensure camera stream stays attached to video element when DOM mounts
+  useEffect(() => {
+    if (isCameraActive && !isSimulatedCamera && videoRef.current && streamRef.current) {
+      if (videoRef.current.srcObject !== streamRef.current) {
+        videoRef.current.srcObject = streamRef.current;
+        videoRef.current.play().catch((err) => console.warn('Video play error:', err));
+      }
+    }
+  }, [isCameraActive, isSimulatedCamera]);
 
   useEffect(() => {
     return () => {
@@ -84,14 +258,55 @@ export const AiHealthGuide: React.FC<AiHealthGuideProps> = ({
 
   // Capture Camera Frame to Image
   const captureCameraFrame = () => {
-    if (videoRef.current && canvasRef.current) {
-      const video = videoRef.current;
+    if (canvasRef.current) {
       const canvas = canvasRef.current;
-      canvas.width = video.videoWidth || 640;
-      canvas.height = video.videoHeight || 480;
+      canvas.width = 640;
+      canvas.height = 480;
       const ctx = canvas.getContext('2d');
       if (ctx) {
-        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        if (!isSimulatedCamera && videoRef.current && videoRef.current.videoWidth > 0) {
+          ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
+        } else {
+          // Draw high-tech simulated medical wound frame for demo
+          ctx.fillStyle = '#070a14';
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+          // Grid pattern
+          ctx.strokeStyle = '#1e293b';
+          ctx.lineWidth = 1;
+          for (let i = 0; i < canvas.width; i += 40) {
+            ctx.beginPath();
+            ctx.moveTo(i, 0);
+            ctx.lineTo(i, canvas.height);
+            ctx.stroke();
+          }
+          for (let j = 0; j < canvas.height; j += 40) {
+            ctx.beginPath();
+            ctx.moveTo(0, j);
+            ctx.lineTo(canvas.width, j);
+            ctx.stroke();
+          }
+
+          // Draw simulated burn/wound area
+          const grad = ctx.createRadialGradient(320, 240, 5, 320, 240, 80);
+          grad.addColorStop(0, '#ef4444');
+          grad.addColorStop(0.5, '#991b1b');
+          grad.addColorStop(1, '#450a0a');
+          ctx.fillStyle = grad;
+          ctx.beginPath();
+          ctx.ellipse(320, 240, 70, 45, Math.PI / 8, 0, Math.PI * 2);
+          ctx.fill();
+
+          // Target reticle
+          ctx.strokeStyle = '#38bdf8';
+          ctx.lineWidth = 2;
+          ctx.strokeRect(180, 120, 280, 240);
+
+          ctx.fillStyle = '#38bdf8';
+          ctx.font = '12px monospace';
+          ctx.fillText('GOOGLE CAMERA LIVE — WOUND SCAN', 190, 110);
+        }
+
         const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
         setImagePreview(dataUrl);
         handleSend(`[Google Camera Live Scan Attached] Please analyze the wound / cut / burn in this camera frame.`, dataUrl);
@@ -235,21 +450,111 @@ export const AiHealthGuide: React.FC<AiHealthGuideProps> = ({
               </span>
             </div>
 
-            <div className="flex items-center gap-2 font-mono-code text-[11px] text-emerald-400 bg-emerald-500/10 px-3 py-1 rounded-full border border-emerald-500/30">
-              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-              LIVE 1080P FEED
+            <div className="flex items-center gap-2 font-mono-code text-[11px]">
+              {isSimulatedCamera ? (
+                <button
+                  onClick={() => window.open(window.location.href, '_blank')}
+                  className="px-3 py-1 rounded-full bg-cyan-500/20 text-cyan-300 border border-cyan-400/40 hover:bg-cyan-500/30 transition-all cursor-pointer flex items-center gap-1 font-bold"
+                >
+                  <span>SIMULATED FEED (ENABLE WEBCAM ↗)</span>
+                </button>
+              ) : (
+                <span className="text-emerald-400 bg-emerald-500/10 px-3 py-1 rounded-full border border-emerald-500/30 flex items-center gap-1.5 font-bold">
+                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                  LIVE 1080P WEBCAM FEED
+                </span>
+              )}
             </div>
           </div>
 
+          {/* Hidden File Input for Wound Photo Upload */}
+          <input
+            type="file"
+            ref={fileInputRef}
+            accept="image/*"
+            className="hidden"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (file) {
+                const reader = new FileReader();
+                reader.onload = (evt) => {
+                  const dataUrl = evt.target?.result as string;
+                  setImagePreview(dataUrl);
+                  handleSend(`[Uploaded Image Attached] Please analyze the wound / cut / burn in this uploaded image.`, dataUrl);
+                };
+                reader.readAsDataURL(file);
+              }
+            }}
+          />
+
+          {/* Camera / Mic Permission Error Callout Box */}
+          {cameraError && (
+            <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/40 text-left space-y-3">
+              <div className="flex items-start gap-2 text-amber-300 font-mono-code text-xs">
+                <span className="material-symbols-outlined text-lg text-amber-400">videocam_off</span>
+                <div>
+                  <h5 className="font-bold text-amber-200 text-sm">Camera & Microphone Access Required</h5>
+                  <p className="text-xs text-amber-300/90 mt-0.5">{cameraError}</p>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2 pt-1">
+                <button
+                  onClick={handleToggleCameraLive}
+                  className="px-4 py-2 rounded-xl bg-amber-400 text-black font-mono-code text-xs font-bold hover:bg-amber-300 transition-all cursor-pointer flex items-center gap-1.5 shadow"
+                >
+                  <span className="material-symbols-outlined text-sm">videocam</span>
+                  <span>GRANT CAMERA PERMISSION</span>
+                </button>
+
+                <button
+                  onClick={() => window.open(window.location.href, '_blank')}
+                  className="px-4 py-2 rounded-xl bg-cyan-500/20 text-cyan-300 border border-cyan-400/40 font-mono-code text-xs font-bold hover:bg-cyan-500/30 transition-all cursor-pointer flex items-center gap-1.5"
+                >
+                  <span className="material-symbols-outlined text-sm">open_in_new</span>
+                  <span>OPEN IN NEW TAB (PROMPT POPUP)</span>
+                </button>
+
+                <button
+                  onClick={() => {
+                    setIsSimulatedCamera(true);
+                    setCameraError(null);
+                  }}
+                  className="px-4 py-2 rounded-xl bg-white/10 text-white/90 hover:bg-white/20 font-mono-code text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5"
+                >
+                  <span className="material-symbols-outlined text-sm">developer_board</span>
+                  <span>USE SIMULATED DEMO HUD</span>
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* Video Stream Feed Container with Sci-Fi Scanner Overlay */}
           <div className="relative aspect-video max-h-[420px] w-full rounded-2xl bg-black overflow-hidden border border-white/20 shadow-inner flex items-center justify-center">
-            <video
-              ref={videoRef}
-              playsInline
-              muted
-              autoPlay
-              className="w-full h-full object-cover"
-            />
+            {isSimulatedCamera ? (
+              <canvas
+                ref={simulatedCanvasRef}
+                width={640}
+                height={480}
+                className="w-full h-full object-cover"
+              />
+            ) : (
+              <video
+                ref={(el) => {
+                  videoRef.current = el;
+                  if (el && streamRef.current && !isSimulatedCamera) {
+                    if (el.srcObject !== streamRef.current) {
+                      el.srcObject = streamRef.current;
+                      el.play().catch((err) => console.warn('Video play error on ref attach:', err));
+                    }
+                  }
+                }}
+                playsInline
+                muted
+                autoPlay
+                className="w-full h-full object-cover"
+              />
+            )}
 
             {/* Sci-Fi Target Bounding Frame & Laser Scanner Line */}
             <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
@@ -272,7 +577,9 @@ export const AiHealthGuide: React.FC<AiHealthGuideProps> = ({
             {/* HUD Status Badges */}
             <div className="absolute top-4 left-4 font-mono-code text-[11px] text-white/90 bg-black/60 px-3 py-1.5 rounded-xl backdrop-blur-md border border-white/10 flex items-center gap-2">
               <span className="material-symbols-outlined text-sm text-[#4d8eff]">camera</span>
-              FPS: 30 | MULTIMODAL SCAN: READY
+              <span>
+                {isSimulatedCamera ? 'SIMULATED LIVE HUD' : 'HARDWARE WEBCAM'} | MULTIMODAL SCAN: READY
+              </span>
             </div>
 
             {/* FLOATING CORNER 3D MASCOT OVERLAY INSIDE CAMERA HUD */}
@@ -305,38 +612,41 @@ export const AiHealthGuide: React.FC<AiHealthGuideProps> = ({
                 />
                 <button
                   type="button"
-                  onClick={() => {
-                    if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
-                      const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-                      const recognition = new SpeechRecognition();
-                      recognition.onresult = (event: any) => {
-                        const transcript = event.results[0][0].transcript;
-                        setPrompt(transcript);
-                      };
-                      recognition.start();
-                    }
-                  }}
-                  title="Voice dictation"
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-cyan-400 hover:text-white text-xs font-mono-code flex items-center gap-1 bg-cyan-500/10 px-2 py-1 rounded-lg border border-cyan-500/30"
+                  onClick={toggleListening}
+                  title="Toggle continuous voice dictation"
+                  className={`absolute right-3 top-1/2 -translate-y-1/2 text-xs font-mono-code flex items-center gap-1.5 px-2.5 py-1 rounded-lg border transition-all cursor-pointer ${
+                    isListening
+                      ? 'bg-red-500/20 text-red-300 border-red-500/50 animate-pulse'
+                      : 'bg-cyan-500/10 text-cyan-400 hover:text-white border-cyan-500/30'
+                  }`}
                 >
-                  <span className="material-symbols-outlined text-sm">mic</span>
-                  <span>VOICE</span>
+                  <span className="material-symbols-outlined text-sm">{isListening ? 'mic' : 'mic_none'}</span>
+                  <span>{isListening ? 'LISTENING...' : 'VOICE MIC'}</span>
                 </button>
               </div>
 
-              <div className="flex items-center gap-2 w-full sm:w-auto">
+              <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
                 <button
                   onClick={captureCameraFrame}
                   disabled={isLoading}
-                  className="flex-1 sm:flex-none px-6 py-3 rounded-xl bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 text-[#00281b] font-mono-code text-xs font-extrabold hover:brightness-110 transition-all flex items-center justify-center gap-2 cursor-pointer shadow-lg shadow-emerald-500/20"
+                  className="flex-1 sm:flex-none px-5 py-3 rounded-xl bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 text-[#00281b] font-mono-code text-xs font-extrabold hover:brightness-110 transition-all flex items-center justify-center gap-2 cursor-pointer shadow-lg shadow-emerald-500/20"
                 >
                   <span className="material-symbols-outlined text-base">shutter_speed</span>
                   <span>{isLoading ? 'ANALYZING...' : 'ANALYZE FRAME & SPEAK'}</span>
                 </button>
 
                 <button
+                  onClick={() => fileInputRef.current?.click()}
+                  className="px-3.5 py-3 rounded-xl bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-300 font-mono-code text-xs font-bold border border-cyan-500/40 transition-colors cursor-pointer flex items-center gap-1.5"
+                  title="Upload wound photo file"
+                >
+                  <span className="material-symbols-outlined text-base">upload_file</span>
+                  <span>UPLOAD PHOTO</span>
+                </button>
+
+                <button
                   onClick={stopCameraStream}
-                  className="px-4 py-3 rounded-xl bg-red-500/20 hover:bg-red-500/30 text-red-300 font-mono-code text-xs font-bold border border-red-500/40 transition-colors cursor-pointer flex-shrink-0"
+                  className="px-3.5 py-3 rounded-xl bg-red-500/20 hover:bg-red-500/30 text-red-300 font-mono-code text-xs font-bold border border-red-500/40 transition-colors cursor-pointer flex-shrink-0"
                 >
                   CLOSE CAMERA
                 </button>
