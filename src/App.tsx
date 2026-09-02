@@ -31,6 +31,11 @@ export default function App() {
     type: string;
   } | null>(null);
 
+  const [upgradeToast, setUpgradeToast] = useState<{
+    title: string;
+    message: string;
+  } | null>(null);
+
   // Accessibility State
   const [accessibility, setAccessibility] = useState<AccessibilityConfig>({
     language: 'English',
@@ -43,7 +48,8 @@ export default function App() {
   const fetchIncidents = async () => {
     try {
       const res = await fetch('/api/incidents');
-      if (res.ok) {
+      const contentType = res.headers.get('content-type');
+      if (res.ok && contentType && contentType.includes('application/json')) {
         const data = await res.json();
         setIncidents(data.incidents || []);
       }
@@ -61,31 +67,37 @@ export default function App() {
       eventSource = new EventSource('/api/stream');
 
       eventSource.addEventListener('INITIAL_STATE', (e: MessageEvent) => {
-        const data = JSON.parse(e.data);
-        if (data.incidents) setIncidents(data.incidents);
+        try {
+          const data = JSON.parse(e.data);
+          if (data.incidents) setIncidents(data.incidents);
+        } catch (err) {}
       });
 
       eventSource.addEventListener('INCIDENT_CREATED', (e: MessageEvent) => {
-        const data = JSON.parse(e.data);
-        if (data.incident) {
-          playEmergencyBeep();
-          setIncidents((prev) => [data.incident, ...prev.filter((i) => i.id !== data.incident.id)]);
-          setSosToast({
-            id: data.incident.id,
-            studentName: data.incident.studentName,
-            location: data.incident.location,
-            type: data.incident.type,
-          });
-        }
+        try {
+          const data = JSON.parse(e.data);
+          if (data.incident) {
+            playEmergencyBeep();
+            setIncidents((prev) => [data.incident, ...prev.filter((i) => i.id !== data.incident.id)]);
+            setSosToast({
+              id: data.incident.id,
+              studentName: data.incident.studentName,
+              location: data.incident.location,
+              type: data.incident.type,
+            });
+          }
+        } catch (err) {}
       });
 
       eventSource.addEventListener('INCIDENT_UPDATED', (e: MessageEvent) => {
-        const data = JSON.parse(e.data);
-        if (data.incident) {
-          setIncidents((prev) =>
-            prev.map((i) => (i.id === data.incident.id ? data.incident : i))
-          );
-        }
+        try {
+          const data = JSON.parse(e.data);
+          if (data.incident) {
+            setIncidents((prev) =>
+              prev.map((i) => (i.id === data.incident.id ? data.incident : i))
+            );
+          }
+        } catch (err) {}
       });
     } catch (err) {
       console.error('SSE initialization error:', err);
@@ -168,6 +180,32 @@ export default function App() {
     }
   };
 
+  const triggerProfileUpgrade = (user: DemoUser) => {
+    const newHelped = (user.incidentsHelpedCount || 0) + 1;
+    const newCredits = (user.heroCredits || 0) + 100;
+    let newTitle = 'Novice Guardian';
+    if (newHelped >= 10) newTitle = 'Cyber Sentinel Legend';
+    else if (newHelped >= 5) newTitle = 'Gold Guard Sentinel';
+    else if (newHelped >= 1) newTitle = 'Silver Shield Guardian';
+
+    const updatedUser: DemoUser = {
+      ...user,
+      incidentsHelpedCount: newHelped,
+      heroCredits: newCredits,
+      heroBadgeTitle: newTitle,
+    };
+
+    setCurrentUser(updatedUser);
+    setUpgradeToast({
+      title: 'PROFILE LEVEL UPGRADED! 🏆',
+      message: `You pledged "I AM HELPING NOW"! Earned +100 Hero Credits (${newCredits} pts). New Rank: ${newTitle} (Helped ${newHelped} peers)`,
+    });
+
+    setTimeout(() => {
+      setUpgradeToast(null);
+    }, 6000);
+  };
+
   const handleRespond = async (incidentId: string) => {
     if (!currentUser) return;
 
@@ -182,6 +220,7 @@ export default function App() {
       setIncidents((prev) =>
         prev.map((i) => (i.id === result.incident.id ? result.incident : i))
       );
+      triggerProfileUpgrade(currentUser);
     }
   };
 
@@ -205,6 +244,9 @@ export default function App() {
       setIncidents((prev) =>
         prev.map((i) => (i.id === result.incident.id ? result.incident : i))
       );
+      if (voteOption === 'HELP_PROVIDED') {
+        triggerProfileUpgrade(currentUser);
+      }
     }
   };
 
@@ -346,6 +388,33 @@ export default function App() {
           onUpdateStatus={handleUpdateStatus}
           onVotePoll={handleVotePoll}
         />
+      )}
+
+      {/* Floating Real-Time Profile Upgrade Toast */}
+      {upgradeToast && (
+        <div className="fixed top-24 left-1/2 -translate-x-1/2 z-50 animate-bounce max-w-lg w-full px-4">
+          <div className="p-4 rounded-2xl bg-[#0c1c14]/95 border-2 border-emerald-400 shadow-[0_0_40px_rgba(16,185,129,0.5)] flex items-start justify-between gap-3 text-left backdrop-blur-md">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-full bg-emerald-500/20 border border-emerald-400 flex items-center justify-center flex-shrink-0 animate-pulse text-emerald-400">
+                <span className="material-symbols-outlined text-2xl">workspace_premium</span>
+              </div>
+              <div className="space-y-1">
+                <h4 className="font-display text-sm font-extrabold text-emerald-300 uppercase tracking-wider">
+                  {upgradeToast.title}
+                </h4>
+                <p className="text-xs text-emerald-100 leading-relaxed">
+                  {upgradeToast.message}
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={() => setUpgradeToast(null)}
+              className="text-emerald-400 hover:text-white text-xs font-mono-code p-1 cursor-pointer"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
       )}
 
       {/* Floating Real-Time SOS Alert Push Toast (Judge Demo Highlight) */}

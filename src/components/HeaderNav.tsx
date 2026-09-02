@@ -104,11 +104,18 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
               className="w-8 h-8 rounded-lg object-cover border border-white/10"
             />
             <div className="flex flex-col text-left hidden sm:flex">
-              <span className="text-xs font-bold text-[#e1e3e4] leading-tight">
-                {currentUser.name}
-              </span>
+              <div className="flex items-center gap-1.5">
+                <span className="text-xs font-bold text-[#e1e3e4] leading-tight">
+                  {currentUser.name}
+                </span>
+                {currentUser.incidentsHelpedCount !== undefined && currentUser.incidentsHelpedCount > 0 && (
+                  <span className="bg-emerald-500/20 text-emerald-300 px-1.5 py-0.2 rounded text-[10px] font-mono-code font-bold">
+                    🤝 {currentUser.incidentsHelpedCount} Helped
+                  </span>
+                )}
+              </div>
               <span className="text-[10px] font-mono-code text-[#adc6ff] uppercase">
-                {currentUser.roleBadge} ({currentUser.id})
+                {currentUser.heroBadgeTitle || currentUser.roleBadge} ({currentUser.heroCredits || 0} pts)
               </span>
             </div>
 

@@ -31,11 +31,20 @@ export const StudentHome: React.FC<StudentHomeProps> = ({
             className="w-14 h-14 rounded-full border border-[#4d8eff]/30 object-cover shadow-md"
           />
           <div>
-            <h1 className="font-display text-2xl font-bold text-[#e1e3e4]">
-              {currentUser.name}
-            </h1>
-            <p className="font-mono-code text-xs text-[#c2c6d6]">
-              {currentUser.id} • Role: {currentUser.role.toUpperCase()}
+            <div className="flex items-center gap-2">
+              <h1 className="font-display text-2xl font-bold text-[#e1e3e4]">
+                {currentUser.name}
+              </h1>
+              {currentUser.heroBadgeTitle && (
+                <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 font-mono-code text-[10px] font-bold">
+                  {currentUser.heroBadgeTitle}
+                </span>
+              )}
+            </div>
+            <p className="font-mono-code text-xs text-[#c2c6d6] flex items-center gap-2 mt-0.5">
+              <span>{currentUser.id} • {currentUser.role.toUpperCase()}</span>
+              <span className="text-[#adc6ff]">★ {currentUser.heroCredits || 0} Hero Pts</span>
+              <span className="text-emerald-400 font-bold">🤝 {currentUser.incidentsHelpedCount || 0} Helped</span>
             </p>
           </div>
         </div>
