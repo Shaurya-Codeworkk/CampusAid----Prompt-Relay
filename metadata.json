@@ -1,0 +1,6 @@
+{
+  "name": "Assistive",
+  "description": "A campus emergency safety platform connecting students and faculty/responders through one-tap emergency alerts, AI-assisted guidance, and shared real-time incident coordination.",
+  "requestFramePermissions": ["camera", "microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
